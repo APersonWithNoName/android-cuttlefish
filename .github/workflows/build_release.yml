@@ -6,6 +6,7 @@ on:
       tag_name:
         description: 'Release tag (e.g., v1.0.0)'
         required: true
+        default: 'v0.0.1'  # 添加默认值
 
 permissions:
   contents: write
@@ -13,27 +14,50 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-22.04-arm64
+    timeout-minutes: 30  # 防止卡死
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整git历史
 
-      - name: Setup Dependencies
+      - name: Setup Environment
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y devscripts debhelper dh-make build-essential
+          sudo apt-get install -y \
+            devscripts \
+            debhelper \
+            dh-make \
+            build-essential \
+            tree  # 调试用
 
       - name: Build Packages
         run: |
-          set -e
+          set -euxo pipefail
+          echo "=== Building Debian Packages ==="
           bash tools/buildutils/build_packages.sh
+          tree -L 3  # 可视化目录结构
 
-      - name: Archive Release
+      - name: Prepare Artifacts
         run: |
           mkdir -p "$GITHUB_WORKSPACE/release"
-          find . -name '*.deb' -exec mv -v {} "$GITHUB_WORKSPACE/release" \;
-          find . -name '*.gz' -exec mv -v {} "$GITHUB_WORKSPACE/release" \;
-          find . -name '*.tar' -exec mv -v {} "$GITHUB_WORKSPACE/release" \;
-          tar -cvf android-cuttlefish-aarch64linux.tar.gz -C "$GITHUB_WORKSPACE/release" .
+          find "$GITHUB_WORKSPACE" \
+            \( -name '*.deb' -o -name '*.gz' -o -name '*.tar' \) \
+            -exec mv -v {} "$GITHUB_WORKSPACE/release" \;
+          
+          echo "=== Artifacts List ==="
+          ls -lh "$GITHUB_WORKSPACE/release"
+
+      - name: Create Archive
+        run: |
+          tar -czvf android-cuttlefish-aarch64linux.tar.gz \
+            -C "$GITHUB_WORKSPACE/release" .
+          sha256sum android-cuttlefish-aarch64linux.tar.gz > checksum.txt
+
+      - name: Verify Artifact
+        run: |
+          test -f android-cuttlefish-aarch64linux.tar.gz || exit 1
+          tar -tzf android-cuttlefish-aarch64linux.tar.gz | head
 
       - name: Create Release
         id: create_release
@@ -41,16 +65,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          release_name: "ARM64 Android Cuttlefish Debian Package ${{ github.event.inputs.tag_name || github.ref_name }}"
+          tag_name: ${{ github.event.inputs.tag_name }}
+          release_name: "ARM64 Cuttlefish ${{ github.event.inputs.tag_name }}"
+          body: "Automated ARM64 Debian package build"
           draft: false
+          prerelease: ${{ !contains(github.event.inputs.tag_name, 'v') }}
 
-      - name: Upload Release Asset
+      - name: Upload Assets
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./android-cuttlefish-aarch64linux.tar.gz
-          asset_name: cuttlefish-arm64.tar.gz
-          asset_content_type: application/gzip
+          asset_path: |
+            android-cuttlefish-aarch64linux.tar.gz
+            checksum.txt
+          asset_name: |
+            cuttlefish-arm64-${{ github.event.inputs.tag_name }}.tar.gz
+            checksum-${{ github.event.inputs.tag_name }}.txt
