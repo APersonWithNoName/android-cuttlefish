@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: ubuntu-22.04-arm64
+    runs-on: ubuntu-latest
     timeout-minutes: 30  # 防止卡死
 
     steps:
