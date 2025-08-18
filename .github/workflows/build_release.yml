@@ -29,14 +29,14 @@ jobs:
             debhelper \
             dh-make \
             build-essential \
-            tree  # 调试用
+            golang \
+            qemu-* 
 
       - name: Build Packages
         run: |
           set -euxo pipefail
           echo "=== Building Debian Packages ==="
           bash tools/buildutils/build_packages.sh
-          tree -L 3  # 可视化目录结构
 
       - name: Prepare Artifacts
         run: |
